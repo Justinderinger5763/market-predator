@@ -10,9 +10,10 @@ from sklearn.linear_model import Ridge
 from datetime import datetime, timedelta
 from scipy.stats import norm
 from streamlit_autorefresh import st_autorefresh
+import time
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Market Predator v23 [LIVE]", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Market Predator v24 [TARGET LOCK]", layout="wide", page_icon="🦅")
 
 # --- AUTHENTICATION ---
 CREDENTIALS = {"admin": "predator", "dad": "silver"}
@@ -37,14 +38,29 @@ if not st.session_state["authenticated"]:
                     st.error("Access Denied")
     st.stop()
 
-# --- CSS: HACKER CONSOLE ---
+# --- CSS: HACKER CONSOLE + COUNTDOWN ---
 st.markdown("""
     <style>
     .stApp { background-color: #0e0e0e; color: #e0e0e0; font-family: 'Consolas', monospace; }
     [data-testid="stSidebar"] { background-color: #1a1a1a; }
     .stTextInput > div > div > input { color: white; background-color: #333333; }
     .stButton > button { background-color: #c92a2a; color: white; border: none; font-weight: bold; }
-    .stTabs [data-baseweb="tab"] { color: white; }
+    
+    /* HUD Styles */
+    .hud-container {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background-color: #1a1a1a;
+        padding: 15px;
+        border-radius: 10px;
+        border: 1px solid #333;
+        margin-bottom: 20px;
+    }
+    .hud-symbol { font-size: 40px; font-weight: bold; color: #c92a2a; margin: 0; }
+    .hud-price { font-size: 60px; font-weight: bold; color: white; margin: 0; }
+    .hud-meta { text-align: right; color: gray; font-size: 14px; }
+    .hud-timer { color: #3498db; font-weight: bold; font-size: 18px; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -128,27 +144,47 @@ class DataHarvester:
         r1, s1 = (2*p)-last['Low'], (2*p)-last['High']
         return f"DAY TRADING PIVOTS:\n[R1]: ${r1:.2f}\n>> PIVOT: ${p:.2f} <<\n[S1]: ${s1:.2f}"
 
+# --- JS COUNTDOWN SCRIPT ---
+# This injects a visual countdown timer that runs in the browser
+countdown_js = """
+<script>
+function startTimer(duration, display) {
+    var timer = duration, minutes, seconds;
+    var interval = setInterval(function () {
+        minutes = parseInt(timer / 60, 10);
+        seconds = parseInt(timer % 60, 10);
+
+        minutes = minutes < 10 ? "0" + minutes : minutes;
+        seconds = seconds < 10 ? "0" + seconds : seconds;
+
+        display.textContent = minutes + ":" + seconds;
+
+        if (--timer < 0) {
+            timer = duration;
+        }
+    }, 1000);
+}
+
+// Start timer on load (300 seconds = 5 min)
+window.onload = function () {
+    var fiveMinutes = 300,
+        display = document.querySelector('#time');
+    startTimer(fiveMinutes, display);
+};
+</script>
+"""
+
 # --- SIDEBAR & REFRESH LOGIC ---
 with st.sidebar:
     st.markdown("## 🦅 PREDATOR\n**CONTROL PANEL**")
-    ticker_input = st.text_input("Ticker", value="SLV").upper()
     
-    # --- AUTO-UPDATE (5 MIN) ---
+    # 1. NO DEFAULT VALUE (Starts Empty)
+    ticker_input = st.text_input("Enter Target Symbol", value="", placeholder="e.g. SLV").upper()
+    
+    # 2. AUTO-REFRESH (5 MIN)
     auto_update = st.checkbox("Auto-Update (5m)", value=True)
     if auto_update:
         st_autorefresh(interval=300000, limit=None, key="predator_counter")
-        
-        # --- REFRESH TIMER DISPLAY ---
-        now = datetime.now()
-        next_run = now + timedelta(minutes=5)
-        st.markdown(f"""
-        <div style='background-color: #333; padding: 10px; border-radius: 5px; margin-top: 10px;'>
-            <p style='margin:0; color:gray; font-size: 12px;'>LAST UPDATE:</p>
-            <p style='margin:0; color:white; font-weight:bold;'>{now.strftime('%H:%M:%S')}</p>
-            <p style='margin:0; color:gray; font-size: 12px; margin-top:5px;'>NEXT UPDATE:</p>
-            <p style='margin:0; color:#3498db; font-weight:bold;'>{next_run.strftime('%H:%M:%S')}</p>
-        </div>
-        """, unsafe_allow_html=True)
     
     run_btn = st.button("RUN LIVE SCAN")
     
@@ -162,6 +198,11 @@ with st.sidebar:
     if st.button("Logout"):
         st.session_state["authenticated"] = False
         st.rerun()
+
+# --- STANDBY SCREEN ---
+if not ticker_input:
+    st.info("🦅 PREDATOR IS READY. ENTER A TARGET TO BEGIN.")
+    st.stop()
 
 # --- MAIN LOGIC ---
 if run_btn or ticker_input or auto_update:
@@ -186,8 +227,27 @@ if run_btn or ticker_input or auto_update:
         df.dropna(inplace=True)
         model = Ridge(alpha=1.0).fit(df[['Return', 'RSI']], df['Target'])
         
-        # DISPLAY
-        st.markdown(f"<h1 style='text-align: center; font-size: 90px; margin-bottom: 0px;'>${curr_price:.2f}</h1>", unsafe_allow_html=True)
+        # --- NEW HUD HEADER ---
+        now_str = datetime.now().strftime('%H:%M:%S')
+        
+        # This HTML block creates the "Heads-Up Display" with the JS Timer
+        st.markdown(f"""
+        <div class="hud-container">
+            <div>
+                <p class="hud-symbol">{ticker_input}</p>
+                <p style="color:gray; margin:0;">LAST SCAN: {now_str}</p>
+            </div>
+            <div>
+                <p class="hud-price">${curr_price:.2f}</p>
+            </div>
+            <div style="text-align:right;">
+                <p style="color:gray; margin:0;">NEXT REFRESH</p>
+                <p class="hud-timer" id="time">05:00</p>
+            </div>
+        </div>
+        {countdown_js} 
+        """, unsafe_allow_html=True)
+        # Note: The JS timer visual resets on every page load, which matches the auto-refresh cycle.
         
         c1, c2, c3 = st.columns(3)
         with c1:
