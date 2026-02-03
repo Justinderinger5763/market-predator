@@ -16,7 +16,7 @@ import time
 st.set_page_config(page_title="Market Predator v24.1 [CENTRAL]", layout="wide", page_icon="🦅")
 
 # --- AUTHENTICATION ---
-CREDENTIALS = {"admin": "predator", "dad": "silver"}
+CREDENTIALS = {"admin": "predator", "dad": "silver", "Gene": "silver"}
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
