@@ -13,7 +13,7 @@ from streamlit_autorefresh import st_autorefresh
 import time
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Market Predator v24 [TARGET LOCK]", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Market Predator v24.1 [CENTRAL]", layout="wide", page_icon="🦅")
 
 # --- AUTHENTICATION ---
 CREDENTIALS = {"admin": "predator", "dad": "silver"}
@@ -145,7 +145,6 @@ class DataHarvester:
         return f"DAY TRADING PIVOTS:\n[R1]: ${r1:.2f}\n>> PIVOT: ${p:.2f} <<\n[S1]: ${s1:.2f}"
 
 # --- JS COUNTDOWN SCRIPT ---
-# This injects a visual countdown timer that runs in the browser
 countdown_js = """
 <script>
 function startTimer(duration, display) {
@@ -164,8 +163,6 @@ function startTimer(duration, display) {
         }
     }, 1000);
 }
-
-// Start timer on load (300 seconds = 5 min)
 window.onload = function () {
     var fiveMinutes = 300,
         display = document.querySelector('#time');
@@ -178,10 +175,9 @@ window.onload = function () {
 with st.sidebar:
     st.markdown("## 🦅 PREDATOR\n**CONTROL PANEL**")
     
-    # 1. NO DEFAULT VALUE (Starts Empty)
-    ticker_input = st.text_input("Enter Target Symbol", value="", placeholder="e.g. SLV").upper()
+    # 1. SIDEBAR INPUT (Kept for convenience)
+    sidebar_input = st.text_input("Enter Target Symbol", value="", placeholder="e.g. SLV", key="sb_input").upper()
     
-    # 2. AUTO-REFRESH (5 MIN)
     auto_update = st.checkbox("Auto-Update (5m)", value=True)
     if auto_update:
         st_autorefresh(interval=300000, limit=None, key="predator_counter")
@@ -190,30 +186,45 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("**RECENT SCANS:**")
-    if st.button("SLV"): ticker_input = "SLV"
-    if st.button("GLD"): ticker_input = "GLD"
-    if st.button("URA"): ticker_input = "URA"
+    if st.button("SLV"): sidebar_input = "SLV"
+    if st.button("GLD"): sidebar_input = "GLD"
+    if st.button("URA"): sidebar_input = "URA"
     
     st.markdown("---")
     if st.button("Logout"):
         st.session_state["authenticated"] = False
         st.rerun()
 
-# --- STANDBY SCREEN ---
-if not ticker_input:
+# --- STANDBY SCREEN (With Central Input) ---
+# Logic: If no sidebar input, show central input.
+# If central input is used, it acts as the "Active Ticker"
+
+active_ticker = sidebar_input
+
+if not active_ticker:
     st.info("🦅 PREDATOR IS READY. ENTER A TARGET TO BEGIN.")
-    st.stop()
+    
+    # --- NEW CENTRAL SEARCH BAR ---
+    c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
+    with c_col2:
+        central_input = st.text_input("🎯 ENTER SYMBOL:", placeholder="Type Ticker (e.g. NVDA) & Hit Enter", key="center_input").upper()
+    
+    if central_input:
+        active_ticker = central_input # Promote central input to active
+    else:
+        st.stop() # Wait here until input is given
 
 # --- MAIN LOGIC ---
-if run_btn or ticker_input or auto_update:
+# If we have an active ticker (from either box), run the app
+if active_ticker:
     harvester = DataHarvester()
     try:
-        stock = yf.Ticker(ticker_input)
+        stock = yf.Ticker(active_ticker)
         df = stock.history(period="2y", interval="1d")
         curr_price = df['Close'].iloc[-1]
         
-        sent, headlines = harvester.get_combined_sentiment(ticker_input)
-        macro_bias, macro_note = harvester.get_macro_pulse(ticker_input)
+        sent, headlines = harvester.get_combined_sentiment(active_ticker)
+        macro_bias, macro_note = harvester.get_macro_pulse(active_ticker)
         hotlist_txt = harvester.get_hotlist(macro_bias)
         pivots_txt = harvester.get_forecast_text(df)
         
@@ -227,14 +238,12 @@ if run_btn or ticker_input or auto_update:
         df.dropna(inplace=True)
         model = Ridge(alpha=1.0).fit(df[['Return', 'RSI']], df['Target'])
         
-        # --- NEW HUD HEADER ---
+        # --- HUD HEADER ---
         now_str = datetime.now().strftime('%H:%M:%S')
-        
-        # This HTML block creates the "Heads-Up Display" with the JS Timer
         st.markdown(f"""
         <div class="hud-container">
             <div>
-                <p class="hud-symbol">{ticker_input}</p>
+                <p class="hud-symbol">{active_ticker}</p>
                 <p style="color:gray; margin:0;">LAST SCAN: {now_str}</p>
             </div>
             <div>
@@ -247,7 +256,6 @@ if run_btn or ticker_input or auto_update:
         </div>
         {countdown_js} 
         """, unsafe_allow_html=True)
-        # Note: The JS timer visual resets on every page load, which matches the auto-refresh cycle.
         
         c1, c2, c3 = st.columns(3)
         with c1:
