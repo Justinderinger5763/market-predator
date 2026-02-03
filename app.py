@@ -9,9 +9,10 @@ from bs4 import BeautifulSoup
 from sklearn.linear_model import Ridge
 from datetime import datetime, timedelta
 from scipy.stats import norm
+from streamlit_autorefresh import st_autorefresh
 
-# --- PAGE CONFIG (Force Wide Mode) ---
-st.set_page_config(page_title="Market Predator v22 [DESKTOP CLONE]", layout="wide", page_icon="🦅")
+# --- PAGE CONFIG ---
+st.set_page_config(page_title="Market Predator v23 [LIVE]", layout="wide", page_icon="🦅")
 
 # --- AUTHENTICATION ---
 CREDENTIALS = {"admin": "predator", "dad": "silver"}
@@ -36,39 +37,18 @@ if not st.session_state["authenticated"]:
                     st.error("Access Denied")
     st.stop()
 
-# --- CSS HACK: FORCE "HACKER CONSOLE" THEME ---
+# --- CSS: HACKER CONSOLE ---
 st.markdown("""
     <style>
-    /* Main Background */
-    .stApp {
-        background-color: #0e0e0e;
-        color: #e0e0e0;
-        font-family: 'Consolas', 'Courier New', monospace;
-    }
-    /* Sidebar Background */
-    [data-testid="stSidebar"] {
-        background-color: #1a1a1a;
-    }
-    /* Input Fields */
-    .stTextInput > div > div > input {
-        color: white;
-        background-color: #333333;
-    }
-    /* Buttons */
-    .stButton > button {
-        background-color: #c92a2a;
-        color: white;
-        border: none;
-        font-weight: bold;
-    }
-    /* Tab Text */
-    .stTabs [data-baseweb="tab"] {
-        color: white;
-    }
+    .stApp { background-color: #0e0e0e; color: #e0e0e0; font-family: 'Consolas', monospace; }
+    [data-testid="stSidebar"] { background-color: #1a1a1a; }
+    .stTextInput > div > div > input { color: white; background-color: #333333; }
+    .stButton > button { background-color: #c92a2a; color: white; border: none; font-weight: bold; }
+    .stTabs [data-baseweb="tab"] { color: white; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- LOGIC CLASSES (Exact Desktop Copy) ---
+# --- LOGIC CLASSES ---
 class BlackScholes:
     @staticmethod
     def price(S, K, T, r, sigma, type="C"):
@@ -95,9 +75,8 @@ class DataHarvester:
                         for x in table.findAll('tr'):
                             if not x.a: continue
                             txt = x.a.get_text()
-                            blob = TextBlob(txt)
                             weight = 2.5 if any(k in txt.upper() for k in triggers) else 1.0
-                            total += (blob.sentiment.polarity * weight)
+                            total += (TextBlob(txt).sentiment.polarity * weight)
                             count += 1
                             if len(headlines) < 8: headlines.append(f"• {txt}")
                             if count >= 20: break
@@ -109,15 +88,13 @@ class DataHarvester:
         try:
             d = yf.download("GC=F SI=F ^TNX", period="5d", progress=False).iloc[-1]
             gsr = d['GC=F']/d['SI=F']
-            yield_chg = d['^TNX'] - 0.0 # simplified
-            
-            bias = 0
-            note = "Neutral"
+            yield_chg = d['^TNX'] - 0.0 
+            bias, note = 0, "Neutral"
             if "SLV" in ticker or "SI" in ticker:
                 if gsr > 85: bias, note = 0.004, f"GSR Bullish ({gsr:.1f})"
                 elif gsr < 70: bias, note = -0.002, f"GSR Bearish ({gsr:.1f})"
             elif "GLD" in ticker or "GC" in ticker:
-                if yield_chg < 4.0: bias, note = 0.003, "Yields Calm" # simplified
+                if yield_chg < 4.0: bias, note = 0.003, "Yields Calm"
             return bias, note
         except: return 0, "Macro Unavail"
 
@@ -125,7 +102,6 @@ class DataHarvester:
         try:
             targets = ["PLTR", "HL", "SOXL", "NVDL", "AG", "GDX", "PAAS", "TSLA", "MARA", "COIN", "AMD", "GME"]
             data = yf.download(targets, period="5d", progress=False)['Close']
-            
             bulls, bears = [], []
             for s in targets:
                 try:
@@ -137,10 +113,8 @@ class DataHarvester:
                     if pct > 0: bulls.append((s, last, pot))
                     else: bears.append((s, last, pot))
                 except: continue
-                
             bulls.sort(key=lambda x: x[2], reverse=True)
             bears.sort(key=lambda x: x[2])
-            
             txt = "\n🔥 INTRADAY HOTLIST (Top 5):\n" + "-"*35 + "\n"
             for x in bulls[:5]: txt += f"{x[0]:<6} | ${x[1]:<7.2f} | +{x[2]:.2f}%\n"
             txt += "\n❄️ INTRADAY COLDLIST (Top 5):\n" + "-"*35 + "\n"
@@ -151,14 +125,31 @@ class DataHarvester:
     def get_forecast_text(self, df):
         last = df.iloc[-1]
         p = (last['High']+last['Low']+last['Close'])/3
-        r1 = (2*p)-last['Low']
-        s1 = (2*p)-last['High']
+        r1, s1 = (2*p)-last['Low'], (2*p)-last['High']
         return f"DAY TRADING PIVOTS:\n[R1]: ${r1:.2f}\n>> PIVOT: ${p:.2f} <<\n[S1]: ${s1:.2f}"
 
-# --- MAIN APP UI ---
+# --- SIDEBAR & REFRESH LOGIC ---
 with st.sidebar:
     st.markdown("## 🦅 PREDATOR\n**CONTROL PANEL**")
     ticker_input = st.text_input("Ticker", value="SLV").upper()
+    
+    # --- AUTO-UPDATE (5 MIN) ---
+    auto_update = st.checkbox("Auto-Update (5m)", value=True)
+    if auto_update:
+        st_autorefresh(interval=300000, limit=None, key="predator_counter")
+        
+        # --- REFRESH TIMER DISPLAY ---
+        now = datetime.now()
+        next_run = now + timedelta(minutes=5)
+        st.markdown(f"""
+        <div style='background-color: #333; padding: 10px; border-radius: 5px; margin-top: 10px;'>
+            <p style='margin:0; color:gray; font-size: 12px;'>LAST UPDATE:</p>
+            <p style='margin:0; color:white; font-weight:bold;'>{now.strftime('%H:%M:%S')}</p>
+            <p style='margin:0; color:gray; font-size: 12px; margin-top:5px;'>NEXT UPDATE:</p>
+            <p style='margin:0; color:#3498db; font-weight:bold;'>{next_run.strftime('%H:%M:%S')}</p>
+        </div>
+        """, unsafe_allow_html=True)
+    
     run_btn = st.button("RUN LIVE SCAN")
     
     st.markdown("---")
@@ -172,26 +163,22 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-if run_btn or ticker_input:
+# --- MAIN LOGIC ---
+if run_btn or ticker_input or auto_update:
     harvester = DataHarvester()
-    
-    # 1. FETCH DATA
     try:
         stock = yf.Ticker(ticker_input)
         df = stock.history(period="2y", interval="1d")
         curr_price = df['Close'].iloc[-1]
         
-        # 2. ANALYSIS
         sent, headlines = harvester.get_combined_sentiment(ticker_input)
         macro_bias, macro_note = harvester.get_macro_pulse(ticker_input)
         hotlist_txt = harvester.get_hotlist(macro_bias)
         pivots_txt = harvester.get_forecast_text(df)
         
-        try:
-            iv = stock.option_chain(stock.options[0]).calls.iloc[0]['impliedVolatility'] * 100
+        try: iv = stock.option_chain(stock.options[0]).calls.iloc[0]['impliedVolatility'] * 100
         except: iv = 30
         
-        # 3. AI PREDICTION
         df['Return'] = df['Close'].pct_change()
         df['Target'] = df['Return'].shift(-1)
         df['RSI'] = ta.rsi(df['Close'], length=14)
@@ -199,41 +186,31 @@ if run_btn or ticker_input:
         df.dropna(inplace=True)
         model = Ridge(alpha=1.0).fit(df[['Return', 'RSI']], df['Target'])
         
-        # --- DISPLAY: BIG PRICE HEADER ---
+        # DISPLAY
         st.markdown(f"<h1 style='text-align: center; font-size: 90px; margin-bottom: 0px;'>${curr_price:.2f}</h1>", unsafe_allow_html=True)
         
-        # --- METERS ROW (Simulated) ---
         c1, c2, c3 = st.columns(3)
         with c1:
             st.markdown("<h4 style='color: #3498db; text-align: center;'>OPTION SAFETY</h4>", unsafe_allow_html=True)
             st.progress(min(iv/50, 1.0))
             status = "GREEN LIGHT" if iv < 30 else "RED LIGHT"
             st.markdown(f"<p style='text-align: center; color: gray;'>{status} ({iv:.1f}%)</p>", unsafe_allow_html=True)
-            
         with c2:
             st.markdown("<h4 style='color: #e74c3c; text-align: center;'>MACRO GRAVITY</h4>", unsafe_allow_html=True)
-            val = 0.5 + (macro_bias * 50)
-            st.progress(min(max(val, 0.0), 1.0))
+            st.progress(min(max(0.5 + (macro_bias * 50), 0.0), 1.0))
             st.markdown(f"<p style='text-align: center; color: gray;'>{macro_note}</p>", unsafe_allow_html=True)
-            
         with c3:
             st.markdown("<h4 style='color: #2ecc71; text-align: center;'>AI MOMENTUM</h4>", unsafe_allow_html=True)
-            st.progress(0.7) # Placeholder logic for visuals
+            st.progress(0.7)
             st.markdown(f"<p style='text-align: center; color: gray;'>Bullish Bias</p>", unsafe_allow_html=True)
 
-        # --- TABS FOR TEXT LOGS ---
         tab_ai, tab_news = st.tabs(["🔮 AI Oracle", "📰 Global Wire"])
         
-        # Generate Text Report (The "Hacker" Text)
-        report_txt = f"--- AI ORACLE: LIVE STREAM ---\n"
-        report_txt += f"Premiums: {status}\nMacro:    {macro_note}\n"
-        report_txt += "-"*65 + "\n"
-        report_txt += f"{'DATE':<10} | {'OPEN':<8} | {'HIGH':<8} | {'LOW':<8} | {'CLOSE':<8}\n"
-        report_txt += "-"*65 + "\n"
+        report_txt = f"--- AI ORACLE: LIVE STREAM ---\nPremiums: {status}\nMacro:    {macro_note}\n" + "-"*65 + "\n"
+        report_txt += f"{'DATE':<10} | {'OPEN':<8} | {'HIGH':<8} | {'LOW':<8} | {'CLOSE':<8}\n" + "-"*65 + "\n"
         
         run_p = curr_price
         atr_pct = df['ATR'].iloc[-1] / curr_price
-        
         for i in range(14):
             d = datetime.now() + timedelta(days=i+1)
             if d.weekday() >= 5: continue
@@ -249,20 +226,10 @@ if run_btn or ticker_input:
             w_p *= (1 + (move * 5))
             report_txt += f"Week {w}: ${w_p:.2f}\n"
             
-        report_txt += "\n🛡️ STRATEGIC ACTION: " 
-        if iv > 40: report_txt += "DEEP ITM CALLS (High IV Avoidance)\n"
-        else: report_txt += "GROWTH CALLS (Leverage)\n"
+        report_txt += "\n🛡️ STRATEGIC ACTION: " + ("DEEP ITM CALLS\n" if iv > 40 else "GROWTH CALLS\n")
         report_txt += f"Target Strike: ${curr_price * 1.05:.0f}\nExp: >120 Days"
 
-        # Display Logs using CODE blocks to preserve formatting
-        with tab_ai:
-            st.code(report_txt, language="text")
-            
-        with tab_news:
-            news_txt = f"{pivots_txt}\n\n=== 📰 GLOBAL WIRE ===\n"
-            for h in headlines: news_txt += f"{h}\n"
-            news_txt += f"\n{hotlist_txt}"
-            st.code(news_txt, language="text")
+        with tab_ai: st.code(report_txt, language="text")
+        with tab_news: st.code(f"{pivots_txt}\n\n=== 📰 GLOBAL WIRE ===\n" + "".join([f"{h}\n" for h in headlines]) + f"\n{hotlist_txt}", language="text")
 
-    except Exception as e:
-        st.error(f"Scan Error: {e}")
+    except Exception as e: st.error(f"Scan Error: {e}")
