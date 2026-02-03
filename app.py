@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import yfinance as yf
 import pandas as pd
 import pandas_ta as ta
@@ -13,10 +14,15 @@ from streamlit_autorefresh import st_autorefresh
 import time
 
 # --- PAGE CONFIG ---
-st.set_page_config(page_title="Market Predator v24.1 [CENTRAL]", layout="wide", page_icon="🦅")
+st.set_page_config(page_title="Market Predator v24.3 [FAMILY]", layout="wide", page_icon="🦅")
 
-# --- AUTHENTICATION ---
-CREDENTIALS = {"admin": "predator", "dad": "silver", "Gene": "silver"}
+# --- AUTHENTICATION (UPDATED) ---
+CREDENTIALS = {
+    "admin": "predator",
+    "Dad": "silver",    # Capitalized
+    "Gene": "silver",   # New User
+    "Sarah": "silver"   # New User
+}
 
 if "authenticated" not in st.session_state:
     st.session_state["authenticated"] = False
@@ -30,6 +36,7 @@ if not st.session_state["authenticated"]:
             user = st.text_input("Username")
             pwd = st.text_input("Password", type="password")
             if st.form_submit_button("Login"):
+                # Check exact match (Case Sensitive)
                 if user in CREDENTIALS and CREDENTIALS[user] == pwd:
                     st.session_state["authenticated"] = True
                     st.session_state["user"] = user
@@ -175,7 +182,6 @@ window.onload = function () {
 with st.sidebar:
     st.markdown("## 🦅 PREDATOR\n**CONTROL PANEL**")
     
-    # 1. SIDEBAR INPUT (Kept for convenience)
     sidebar_input = st.text_input("Enter Target Symbol", value="", placeholder="e.g. SLV", key="sb_input").upper()
     
     auto_update = st.checkbox("Auto-Update (5m)", value=True)
@@ -195,28 +201,34 @@ with st.sidebar:
         st.session_state["authenticated"] = False
         st.rerun()
 
-# --- STANDBY SCREEN (With Central Input) ---
-# Logic: If no sidebar input, show central input.
-# If central input is used, it acts as the "Active Ticker"
-
+# --- STANDBY SCREEN (With Central Form) ---
 active_ticker = sidebar_input
 
 if not active_ticker:
     st.info("🦅 PREDATOR IS READY. ENTER A TARGET TO BEGIN.")
     
-    # --- NEW CENTRAL SEARCH BAR ---
+    # --- FORM FIX: Force Keyboard Close on Submit ---
     c_col1, c_col2, c_col3 = st.columns([1, 2, 1])
     with c_col2:
-        central_input = st.text_input("🎯 ENTER SYMBOL:", placeholder="Type Ticker (e.g. NVDA) & Hit Enter", key="center_input").upper()
+        with st.form(key='mobile_search_form'):
+            central_input = st.text_input("🎯 ENTER SYMBOL:", placeholder="Type Ticker (e.g. NVDA)", key="center_input").upper()
+            submit_val = st.form_submit_button("RUN SCAN", type="primary")
     
-    if central_input:
-        active_ticker = central_input # Promote central input to active
+    if submit_val or central_input:
+        active_ticker = central_input
     else:
-        st.stop() # Wait here until input is given
+        st.stop()
 
 # --- MAIN LOGIC ---
-# If we have an active ticker (from either box), run the app
 if active_ticker:
+    
+    # --- KEYBOARD KILLER: FORCE CLOSE KEYBOARD ON MOBILE ---
+    components.html("""
+        <script>
+            window.parent.document.activeElement.blur();
+        </script>
+    """, height=0)
+
     harvester = DataHarvester()
     try:
         stock = yf.Ticker(active_ticker)
